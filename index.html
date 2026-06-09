@@ -6,7 +6,7 @@
 <title>Sheepridge Solar — forecast vs actual</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js"></script>
+<script src="chart.umd.js"></script>
 <style>
   :root{
     --sky:#EEF2F6; --card:#FFFFFF; --ink:#16243A; --ink-soft:#5A6B82;
@@ -198,6 +198,15 @@ function render(d){
   }
 
   // ---- hourly chart ----
+  try{ buildChart(d); }catch(err){
+    document.querySelector('.chart-wrap').innerHTML =
+      '<div class="state">Chart failed to render: <code>'+err.message+'</code></div>';
+  }
+
+  buildCards(d, fsTotal, actual, adj, sc);
+}
+
+function buildChart(d){
   const labels = Array.from({length:24},(_,i)=>String(i).padStart(2,'0'));
   new Chart(document.getElementById('chart'),{
     data:{
@@ -230,8 +239,9 @@ function render(d){
       }
     }
   });
+}
 
-  // ---- stat cards ----
+function buildCards(d, fsTotal, actual, adj, sc){
   const delta = (f)=> (actual==null||f==null||f===0) ? '' :
     (()=>{const p=(actual-f)/f*100; const cls=p>=0?'pos':'neg';
       return '<div class="d '+cls+'">actual '+(p>=0?'+':'')+p.toFixed(0)+'% vs this</div>';})();
