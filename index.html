@@ -111,23 +111,25 @@ async function load(){
 
 function hourlyActual(series){
   // Cumulative kWh samples -> kWh generated per local hour.
-  const maxPerHour = {};
-  for(const p of series){
-    const h = new Date(p.t).toLocaleString('en-GB',{hour:'2-digit',hour12:false,timeZone:'Europe/London'});
-    const hh = h.padStart(2,'0');
-    maxPerHour[hh] = Math.max(maxPerHour[hh] ?? 0, p.v);
-  }
+  // The first sample at 00:00 is yesterday's total (state at window start),
+  // and the counter resets to 0 just after midnight — so walk sample-by-sample
+  // and treat any decrease as a reset rather than negative generation.
   const out = Array(24).fill(null);
-  let prev = 0, seen = false;
-  for(let i=0;i<24;i++){
-    const key = String(i).padStart(2,'0');
-    if(key in maxPerHour){
-      out[i] = Math.max(0, maxPerHour[key]-prev);
-      prev = maxPerHour[key]; seen = true;
-    }else if(seen && i < new Date().getHours()){
-      out[i] = 0;
+  const sorted = [...series].sort((a,b)=>new Date(a.t)-new Date(b.t));
+  let prev = null;
+  for(const p of sorted){
+    const hr = parseInt(new Date(p.t).toLocaleString('en-GB',
+      {hour:'2-digit',hour12:false,timeZone:'Europe/London'}),10) % 24;
+    if(prev !== null){
+      const delta = p.v >= prev ? p.v - prev : p.v; // decrease = counter reset
+      out[hr] = (out[hr] ?? 0) + delta;
     }
+    prev = p.v;
   }
+  // Hours that have passed with no samples are genuinely zero, not unknown.
+  const nowHr = parseInt(new Date().toLocaleString('en-GB',
+    {hour:'2-digit',hour12:false,timeZone:'Europe/London'}),10) % 24;
+  for(let i=0;i<=nowHr;i++) if(out[i]==null) out[i]=0;
   return out;
 }
 
