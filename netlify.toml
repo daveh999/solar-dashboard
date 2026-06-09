@@ -1,0 +1,6 @@
+# Netlify configuration for the solar dashboard.
+# Static site from the repo root, functions in netlify/functions.
+
+[build]
+  publish = "."
+  functions = "netlify/functions"

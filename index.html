@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sheepridge Solar — forecast vs actual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js"></script>
+<style>
+  :root{
+    --sky:#EEF2F6; --card:#FFFFFF; --ink:#16243A; --ink-soft:#5A6B82;
+    --sun:#E8A317; --sun-deep:#C77F00;
+    --adjusted:#3D6B9E; --raw:#93AAC6; --solcast:#7A6FB8; --cloud:#C9D3DF;
+    --line:#D9E1EA; --good:#2E7D5B; --bad:#B3503A;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--sky); color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif; font-size:15px; line-height:1.5;
+    padding:28px 20px 60px;
+  }
+  .wrap{max-width:980px;margin:0 auto}
+  header{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:6px}
+  h1{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:clamp(24px,4vw,34px);letter-spacing:-.01em}
+  .meta{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink-soft)}
+  .sub{color:var(--ink-soft);margin-bottom:28px}
+
+  /* ---- signature element: the forecast spread rail ---- */
+  .rail-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px 26px 18px;margin-bottom:18px}
+  .rail-title{font-family:'Bricolage Grotesque',sans-serif;font-weight:500;font-size:15px;margin-bottom:34px;color:var(--ink-soft)}
+  .rail{position:relative;height:8px;background:linear-gradient(90deg,#E3EAF2,#D5DEE9);border-radius:4px;margin:0 12px 64px}
+  .tick{position:absolute;top:-7px;width:2px;height:22px;border-radius:1px;transform:translateX(-1px)}
+  .tick-label{position:absolute;top:26px;transform:translateX(-50%);text-align:center;white-space:nowrap;font-size:11.5px;color:var(--ink-soft)}
+  .tick-label b{display:block;font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--ink)}
+  .band{position:absolute;top:0;height:8px;background:rgba(122,111,184,.18);border-radius:4px}
+  .sun-marker{position:absolute;top:-11px;width:30px;height:30px;transform:translateX(-15px);background:radial-gradient(circle at 38% 35%,#FFD269,var(--sun) 70%);border:2px solid var(--card);border-radius:50%;box-shadow:0 2px 10px rgba(232,163,23,.45)}
+  .sun-label{position:absolute;top:-46px;transform:translateX(-50%);font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:var(--sun-deep);white-space:nowrap}
+  @media (prefers-reduced-motion:no-preference){
+    .sun-marker{transition:left .8s cubic-bezier(.2,.8,.2,1)}
+    .tick,.band{transition:left .8s ease,width .8s ease}
+  }
+
+  .chart-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:18px}
+  .chart-card h2{font-family:'Bricolage Grotesque',sans-serif;font-weight:500;font-size:15px;color:var(--ink-soft);margin-bottom:14px}
+  .chart-wrap{position:relative;height:340px}
+  @media (max-width:600px){.chart-wrap{height:260px}}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .stat .k{font-size:12px;color:var(--ink-soft);margin-bottom:6px;display:flex;align-items:center;gap:7px}
+  .swatch{width:10px;height:10px;border-radius:3px;flex:none}
+  .stat .v{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600}
+  .stat .d{font-size:12px;margin-top:4px;color:var(--ink-soft)}
+  .pos{color:var(--good)} .neg{color:var(--bad)}
+
+  .state{padding:60px 0;text-align:center;color:var(--ink-soft)}
+  .state code{font-family:'IBM Plex Mono',monospace;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:2px 6px}
+  footer{margin-top:26px;font-size:12px;color:var(--ink-soft);text-align:center}
+  a{color:var(--adjusted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Sheepridge Solar</h1>
+    <div class="meta" id="meta">loading…</div>
+  </header>
+  <p class="sub">Today's generation against three forecasts — Forecast.Solar, the cloud-adjusted model, and Solcast.</p>
+
+  <div id="loading" class="state">Fetching live data from Home Assistant…</div>
+  <div id="error" class="state" style="display:none"></div>
+
+  <div id="dash" style="display:none">
+    <section class="rail-card">
+      <div class="rail-title">Where today landed — each forecaster's total on one scale (kWh)</div>
+      <div class="rail" id="rail"></div>
+    </section>
+
+    <section class="chart-card">
+      <h2>Hourly profile — forecasts vs actual generation</h2>
+      <div class="chart-wrap"><canvas id="chart"></canvas></div>
+    </section>
+
+    <section class="cards" id="cards"></section>
+  </div>
+
+  <footer>Read-only via Netlify Function proxy · refreshes every 5 min · <span id="stamp"></span></footer>
+</div>
+
+<script>
+const C = getComputedStyle(document.documentElement);
+const col = n => C.getPropertyValue(n).trim();
+const fmt = (v,dp=1) => v==null ? '—' : Number(v).toFixed(dp);
+
+async function load(){
+  try{
+    const res = await fetch('/api/solar');
+    if(!res.ok){
+      const body = await res.json().catch(()=>({}));
+      throw new Error(body.error || ('Proxy returned '+res.status));
+    }
+    render(await res.json());
+  }catch(err){
+    document.getElementById('loading').style.display='none';
+    const e = document.getElementById('error');
+    e.style.display='block';
+    e.innerHTML = 'Could not reach Home Assistant.<br><code>'+err.message+'</code>';
+  }
+}
+
+function hourlyActual(series){
+  // Cumulative kWh samples -> kWh generated per local hour.
+  const maxPerHour = {};
+  for(const p of series){
+    const h = new Date(p.t).toLocaleString('en-GB',{hour:'2-digit',hour12:false,timeZone:'Europe/London'});
+    const hh = h.padStart(2,'0');
+    maxPerHour[hh] = Math.max(maxPerHour[hh] ?? 0, p.v);
+  }
+  const out = Array(24).fill(null);
+  let prev = 0, seen = false;
+  for(let i=0;i<24;i++){
+    const key = String(i).padStart(2,'0');
+    if(key in maxPerHour){
+      out[i] = Math.max(0, maxPerHour[key]-prev);
+      prev = maxPerHour[key]; seen = true;
+    }else if(seen && i < new Date().getHours()){
+      out[i] = 0;
+    }
+  }
+  return out;
+}
+
+function whMapToKwh(map){
+  return Array.from({length:24},(_,i)=>{
+    const v = map[String(i).padStart(2,'0')+':00'];
+    return v==null ? null : v/1000;
+  });
+}
+
+function solcastHourly(list){
+  const out = Array(24).fill(null);
+  for(const h of (list||[])){
+    const hr = new Date(h.t).getHours();
+    out[hr] = h.kwh;
+  }
+  return out;
+}
+
+function render(d){
+  document.getElementById('loading').style.display='none';
+  document.getElementById('dash').style.display='block';
+
+  const fsTotal = (d.forecastSolar.garageKwh??0)+(d.forecastSolar.houseKwh??0);
+  const actual = d.actual.todayKwh;
+  const adj = d.adjusted.totalKwh;
+  const sc = d.solcast.estimateKwh;
+
+  document.getElementById('meta').textContent =
+    new Date(d.generatedAt).toLocaleString('en-GB',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'Europe/London'});
+  document.getElementById('stamp').textContent = 'data '+new Date(d.generatedAt).toLocaleTimeString('en-GB',{timeZone:'Europe/London'});
+
+  // ---- spread rail ----
+  const rail = document.getElementById('rail');
+  const vals = [fsTotal, adj, sc, actual, d.solcast.estimate90Kwh].filter(v=>v!=null);
+  const max = Math.max(...vals)*1.12 || 1;
+  const pct = v => (v/max*100)+'%';
+  rail.innerHTML = '';
+  if(d.solcast.estimate10Kwh!=null && d.solcast.estimate90Kwh!=null){
+    const b = document.createElement('div'); b.className='band';
+    b.style.left = pct(d.solcast.estimate10Kwh);
+    b.style.width = ((d.solcast.estimate90Kwh-d.solcast.estimate10Kwh)/max*100)+'%';
+    b.title = 'Solcast 10–90% band';
+    rail.appendChild(b);
+  }
+  const ticks = [
+    {v:fsTotal, label:'Forecast.Solar', c:col('--raw')},
+    {v:adj,     label:'Adjusted',       c:col('--adjusted')},
+    {v:sc,      label:'Solcast',        c:col('--solcast')},
+  ];
+  for(const t of ticks){
+    if(t.v==null) continue;
+    const el = document.createElement('div'); el.className='tick';
+    el.style.left = pct(t.v); el.style.background = t.c;
+    rail.appendChild(el);
+    const lb = document.createElement('div'); lb.className='tick-label';
+    lb.style.left = pct(t.v);
+    lb.innerHTML = t.label+'<b>'+fmt(t.v)+'</b>';
+    rail.appendChild(lb);
+  }
+  if(actual!=null){
+    const lb = document.createElement('div'); lb.className='sun-label';
+    lb.style.left = pct(actual); lb.textContent = 'Actual '+fmt(actual)+' kWh';
+    rail.appendChild(lb);
+    const sun = document.createElement('div'); sun.className='sun-marker';
+    sun.style.left = pct(actual);
+    rail.appendChild(sun);
+  }
+
+  // ---- hourly chart ----
+  const labels = Array.from({length:24},(_,i)=>String(i).padStart(2,'0'));
+  new Chart(document.getElementById('chart'),{
+    data:{
+      labels,
+      datasets:[
+        {type:'bar', label:'Actual', data:hourlyActual(d.actual.cumulativeSeries),
+         backgroundColor:'rgba(232,163,23,.75)', borderRadius:3, order:3},
+        {type:'line', label:'Adjusted forecast', data:whMapToKwh(d.adjusted.hourlyWh),
+         borderColor:col('--adjusted'), backgroundColor:'transparent',
+         borderWidth:2, pointRadius:0, tension:.35, order:1},
+        {type:'line', label:'Forecast.Solar raw', data:whMapToKwh(d.adjusted.rawWh),
+         borderColor:col('--raw'), borderDash:[6,4], backgroundColor:'transparent',
+         borderWidth:1.5, pointRadius:0, tension:.35, order:2},
+        {type:'line', label:'Solcast', data:solcastHourly(d.solcast.hourly),
+         borderColor:col('--solcast'), borderDash:[2,3], backgroundColor:'transparent',
+         borderWidth:1.5, pointRadius:0, tension:.35, order:2},
+      ]
+    },
+    options:{
+      maintainAspectRatio:false, animation:false,
+      interaction:{mode:'index',intersect:false},
+      scales:{
+        x:{grid:{display:false}, ticks:{font:{family:'IBM Plex Mono',size:10}, color:col('--ink-soft')}},
+        y:{title:{display:true,text:'kWh per hour',color:col('--ink-soft'),font:{size:11}},
+           grid:{color:col('--line')}, ticks:{font:{family:'IBM Plex Mono',size:10}, color:col('--ink-soft')}}
+      },
+      plugins:{
+        legend:{labels:{usePointStyle:true,pointStyle:'line',boxWidth:24,color:col('--ink'),font:{size:12}}},
+        tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+(c.parsed.y==null?'—':c.parsed.y.toFixed(2))+' kWh'}}
+      }
+    }
+  });
+
+  // ---- stat cards ----
+  const delta = (f)=> (actual==null||f==null||f===0) ? '' :
+    (()=>{const p=(actual-f)/f*100; const cls=p>=0?'pos':'neg';
+      return '<div class="d '+cls+'">actual '+(p>=0?'+':'')+p.toFixed(0)+'% vs this</div>';})();
+  const ratio = d.calibrationRatio30d;
+  document.getElementById('cards').innerHTML = `
+    <div class="stat"><div class="k"><span class="swatch" style="background:var(--sun)"></span>Actual today</div>
+      <div class="v">${fmt(actual)} kWh</div><div class="d">myenergi, cumulative</div></div>
+    <div class="stat"><div class="k"><span class="swatch" style="background:var(--adjusted)"></span>Adjusted forecast</div>
+      <div class="v">${fmt(adj)} kWh</div>${delta(adj)}</div>
+    <div class="stat"><div class="k"><span class="swatch" style="background:var(--solcast)"></span>Solcast</div>
+      <div class="v">${fmt(sc)} kWh</div><div class="d">band ${fmt(d.solcast.estimate10Kwh)}–${fmt(d.solcast.estimate90Kwh)}</div></div>
+    <div class="stat"><div class="k"><span class="swatch" style="background:var(--raw)"></span>Forecast.Solar</div>
+      <div class="v">${fmt(fsTotal)} kWh</div><div class="d">garage ${fmt(d.forecastSolar.garageKwh)} · house ${fmt(d.forecastSolar.houseKwh)}</div></div>
+    <div class="stat"><div class="k">Calibration 30d</div>
+      <div class="v">${fmt(ratio,3)}</div><div class="d">${ratio==null?'':ratio>1?'forecasts running low':'forecasts running high'}</div></div>`;
+}
+
+load();
+setInterval(load, 5*60*1000);
+</script>
+</body>
+</html>
